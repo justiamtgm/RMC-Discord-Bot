@@ -21,7 +21,7 @@ class Wiki(commands.Cog):
             #"help": "Заменено на сообщение справки. Получается, этот вариант отныне невозможно вызвать?",
             "map": "\n - https://hoi4.paradoxwikis.com/Map_modding \n - https://hoi4.paradoxwikis.com/State_modding \n - https://hoi4.paradoxwikis.com/Supply_areas_modding \n - https://hoi4.paradoxwikis.com/Strategic_region_modding \n - https://hoi4.paradoxwikis.com/Nudger",
             "country": "https://hoi4.paradoxwikis.com/Country_creation",
-            "data_structure": "https://hoi4.paradoxwikis.com/Data_structures",
+            "data_structures": "https://hoi4.paradoxwikis.com/Data_structures",
             "effect": "https://hoi4.paradoxwikis.com/Effect",
             "defines": "https://hoi4.paradoxwikis.com/Defines",
             "scopes": "https://hoi4.paradoxwikis.com/Scopes",
