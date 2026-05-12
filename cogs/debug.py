@@ -1,6 +1,7 @@
 from discord.ext import commands
 import discord,json,io
 from discord import app_commands
+from utils.exceptions import NoLogChannelError
 from utils.permissions import check_cog_access
 from utils import settings_cache as settings
 from constants import MAX_MESSAGE,RMC_EMBED_COLOR
@@ -129,12 +130,7 @@ class Debug(commands.Cog):
             )
             await ctx.send(embed=embed)
         else:
-            embed = discord.Embed(
-                title="❌ Канал для логов не установлен",
-                description="Для установки используйте `/set_log`",
-                color=RMC_EMBED_COLOR
-            )
-            await ctx.send(embed=embed)
+            raise NoLogChannelError()
 
 
 async def setup(bot):

@@ -1,16 +1,18 @@
-import discord, os, aiohttp
+import discord
+import datetime
+# import os, aiohttp
 from discord.ext import commands
-from discord import app_commands, Webhook
+from discord import app_commands
+# from discord import Webhook
 from constants import RMC_EMBED_COLOR
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    TOKEN = os.getenv("TOKEN")
-except:
-    print('Can\'t load TOKEN from .env')
-from utils.permissions import check_cog_access
+# try:
+#     from dotenv import load_dotenv
+#     load_dotenv()
+#     TOKEN = os.getenv("TOKEN")
+# except:
+#     print('Can\'t load TOKEN from .env')
+from utils.permissions import check_cog_access, check_admin_interaction
 from utils import settings_cache as settings
-
 
 
 class Resolution(commands.Cog):
@@ -26,30 +28,16 @@ class Resolution(commands.Cog):
             raise commands.CheckFailure()
         return True
 
-    async def check_admin(self, interaction: discord.Interaction) -> bool:
-        """Проверяет, есть ли у пользователя админская роль"""
-        settings_data = settings.load_settings()
-        admin_roles = settings_data.get('admin_roles', [])
-        user_roles = [role.id for role in interaction.user.roles]
-        return any(role_id in admin_roles for role_id in user_roles)
-
     @app_commands.command(
         name="resolution",
         description="Создать резолюцию"
     )
     @app_commands.guild_only()
     async def resolution(self, interaction: discord.Interaction):
-        if not await self.check_admin(interaction):
-            await interaction.response.send_message("❌ Недостаточно прав", ephemeral=True)
-            return
+        await check_admin_interaction(interaction)
 
         """Создать резолюцию"""
-        modal = ResolutionModal(
-            channel=interaction.channel,
-            guild=interaction.guild,
-            author=interaction.user,
-            bot=self.bot
-        )
+        modal = ResolutionModal()
         await interaction.response.send_modal(modal)
 
 
@@ -76,15 +64,11 @@ class ResolutionModal(discord.ui.Modal, title="Создание резолюци
         max_length=2
     )
 
-    def __init__(self, channel: discord.TextChannel, guild: discord.Guild, author: discord.Member, bot: commands.Bot):
+    def __init__(self):
         super().__init__()
-        self.channel = channel
-        self.guild = guild
-        self.author = author
-        self.bot = bot
 
     async def on_submit(self, interaction: discord.Interaction):
-        print(f"[ResolutionModal] submitted by {interaction.user} in {self.channel} (guild {self.guild})")
+        print(f"[ResolutionModal] submitted by {interaction.user} in {interaction.channel} (guild {interaction.guild})")
         
         # Проверяем число
         try:
@@ -108,7 +92,7 @@ class ResolutionModal(discord.ui.Modal, title="Создание резолюци
             color=RMC_EMBED_COLOR,
             timestamp=discord.utils.utcnow()
         )
-        embed.set_footer(text=f"Автор: {self.author.display_name}")
+        embed.set_footer(text=f"Автор: {interaction.user.display_name}")
 
         await interaction.response.send_message("✅ Резолюция публикуется...", ephemeral=True)
         
@@ -118,64 +102,73 @@ class ResolutionModal(discord.ui.Modal, title="Создание резолюци
         admin_mentions = " ".join(
             role.mention
             for rid in admin_roles_ids
-            if (role := self.guild.get_role(rid))
+            if (role := interaction.guild.get_role(rid))
         ) or "⚠️ (Нет настроенных админ-ролей)"
-        resolution_message = await self.channel.send(content=admin_mentions, embed=embed)
         
-        await self.create_poll(interaction, duration_days)
+        poll = discord.Poll(
+            question=f"Резолюция #{self.number.value}: {self.title_input.value}",
+            duration=datetime.timedelta(days=duration_days),
+            multiple=False
+        )
+        poll.add_answer(text="За", emoji=discord.PartialEmoji(name="approved", id=1419728225797541958))
+        poll.add_answer(text="Против", emoji=discord.PartialEmoji(name="declined", id=1419728189059502080))
+        poll.add_answer(text="Воздерживаюсь", emoji=discord.PartialEmoji(name="abstained", id=1419906353316495471))
+        
+        await interaction.channel.send(content=admin_mentions, embed=embed, poll=poll)
 
-    async def create_poll(self, interaction: discord.Interaction, duration_days: int):
-        """Создает опрос через прямой HTTP запрос к Discord API"""
-        try:
-            headers = {
-                "Authorization": f"Bot {TOKEN}",
-                "Content-Type": "application/json"
-            }
-            
-            poll_data = {
-                "poll": {
-                    "question": {
-                        "text": f"Резолюция #{self.number.value}: {self.title_input.value}"
-                    },
-                    "answers": [
-                        {"poll_media": {"text": "За", "emoji": {"id": 1419728225797541958, "name": "approved"}}}, #<:approved:1422601900737560656>
-                        {"poll_media": {"text": "Против", "emoji": {"id": 1419728189059502080, "name": "declined"}}}, #<:declined:1422601837370146969>
-                        {"poll_media": {"text": "Воздерживаюсь", "emoji": {"id": 1419906353316495471,"name": "abstained"}}} #<:abstained:1422601751336321096>
-                    ],
-                    "duration": duration_days * 24,
-                    "allow_multiselect": False
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"https://discord.com/api/v10/channels/{self.channel.id}/messages",
-                    headers=headers,
-                    json=poll_data
-                ) as response:
-                    
-                    if response.status == 200:
-                        print(f"[ResolutionModal] Poll created successfully in channel {self.channel.id}")
-                    else:
-                        error_text = await response.text()
-                        print(f"[ResolutionModal] Failed to create poll: {response.status} - {error_text}")
-                        
-                        error_embed = discord.Embed(
-                            title="❌ Ошибка при создании опроса",
-                            description="Не удалось создать опрос для голосования. Проверьте права бота.",
-                            color=0xff0000
-                        )
-                        await self.channel.send(embed=error_embed)
-                        
-        except Exception as e:
-            print(f"[ResolutionModal] Error creating poll: {e}")
-            
-            error_embed = discord.Embed(
-                title="❌ Ошибка при создании опроса",
-                description=f"Произошла ошибка: {str(e)}",
-                color=0xff0000
-            )
-            await self.channel.send(embed=error_embed)
+    # Legacy:
+    # async def create_poll(self, interaction: discord.Interaction, duration_days: int):
+    #     """Создает опрос через прямой HTTP запрос к Discord API"""
+    #     try:
+    #         headers = {
+    #             "Authorization": f"Bot {TOKEN}",
+    #             "Content-Type": "application/json"
+    #         }
+    #         
+    #         poll_data = {
+    #             "poll": {
+    #                 "question": {
+    #                     "text": f"Резолюция #{self.number.value}: {self.title_input.value}"
+    #                 },
+    #                 "answers": [
+    #                     {"poll_media": {"text": "За", "emoji": {"id": 1419728225797541958, "name": "approved"}}}, #<:approved:1422601900737560656>
+    #                     {"poll_media": {"text": "Против", "emoji": {"id": 1419728189059502080, "name": "declined"}}}, #<:declined:1422601837370146969>
+    #                     {"poll_media": {"text": "Воздерживаюсь", "emoji": {"id": 1419906353316495471,"name": "abstained"}}} #<:abstained:1422601751336321096>
+    #                 ],
+    #                 "duration": duration_days * 24,
+    #                 "allow_multiselect": False
+    #             }
+    #         }
+    #         
+    #         async with aiohttp.ClientSession() as session:
+    #             async with session.post(
+    #                 f"https://discord.com/api/v10/channels/{self.channel.id}/messages",
+    #                 headers=headers,
+    #                 json=poll_data
+    #             ) as response:
+    #                 
+    #                 if response.status == 200:
+    #                     print(f"[ResolutionModal] Poll created successfully in channel {self.channel.id}")
+    #                 else:
+    #                     error_text = await response.text()
+    #                     print(f"[ResolutionModal] Failed to create poll: {response.status} - {error_text}")
+    #                     
+    #                     error_embed = discord.Embed(
+    #                         title="❌ Ошибка при создании опроса",
+    #                         description="Не удалось создать опрос для голосования. Проверьте права бота.",
+    #                         color=0xff0000
+    #                     )
+    #                     await self.channel.send(embed=error_embed)
+    #                     
+    #     except Exception as e:
+    #         print(f"[ResolutionModal] Error creating poll: {e}")
+    #         
+    #         error_embed = discord.Embed(
+    #             title="❌ Ошибка при создании опроса",
+    #             description=f"Произошла ошибка: {str(e)}",
+    #             color=0xff0000
+    #         )
+    #         await self.channel.send(embed=error_embed)
 
 
 async def setup(bot: commands.Bot):

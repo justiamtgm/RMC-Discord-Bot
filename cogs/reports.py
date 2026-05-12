@@ -4,13 +4,10 @@ from discord import app_commands
 from utils.permissions import check_cog_access
 from utils import settings_cache as settings
 from discord.ui import View, Button
-import sys
-import os
 from constants import RMC_EMBED_COLOR
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
+#TODO: сделать логику сохранения кнопок ответа на репорт чтобы они не умирали при перезагрузке
+# что-то сделать с архивацией ветки (получить ID через self.report_message.id)
 class Reports(commands.Cog):
     required_access = "admin"
 
@@ -38,12 +35,12 @@ class Reports(commands.Cog):
 
     # ====== Управление каналами для репортов ======
     @commands.hybrid_command(
-        name="addreport",
+        name="report_add",
         with_app_command=True,  # регистрирует как slash
         description="Добавляет канал в список каналов, куда отправляются репорты"
     )
     @commands.has_permissions(manage_channels=True)
-    async def addreport(self, ctx, channel: discord.TextChannel = None):
+    async def report_add(self, ctx, channel: discord.TextChannel = None):
         if channel is None:
             channel = ctx.channel
         data = settings.load_settings()
@@ -71,12 +68,12 @@ class Reports(commands.Cog):
         )
 
     @commands.hybrid_command(
-        name="removereport",
+        name="report_remove",
         with_app_command=True,  # регистрирует как slash
         description="Удаляет канал из списка каналов, куда отправляются репорты"
     )
     @commands.has_permissions(manage_channels=True)
-    async def removereport(self, ctx, channel: discord.TextChannel = None):
+    async def report_remove(self, ctx, channel: discord.TextChannel = None):
         if channel is None:
             channel = ctx.channel
 
@@ -104,11 +101,11 @@ class Reports(commands.Cog):
             embed=embed
         )
     @commands.hybrid_command(
-        name="listreports",
+        name="report_list",
         with_app_command=True,  # регистрирует как slash
         description="Список репорт-каналов"
     )
-    async def listreports(self, ctx):
+    async def report_list(self, ctx):
         data = settings.load_settings()
 
         report_channel_ids = set(data.get("report_channels", []))
@@ -532,26 +529,6 @@ class Reports(commands.Cog):
                 await self.report_message.edit(embed=embed, view=None)
                 await interaction.response.send_message("✅ Ответ добавлен к репорту.", ephemeral=True)
 
-        # --- View для выбора типа ответа ---
-        class AnswerTypeView(discord.ui.View):
-            def __init__(self, report_message: discord.Message):
-                super().__init__(timeout=120)
-                self.report_message = report_message
-
-            @discord.ui.button(label="Выполнено", style=discord.ButtonStyle.success, emoji="✅")
-            async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                modal = ReportCommentModal(self.report_message, "✅ Выполнено")
-                await interaction.response.send_modal(modal)
-
-            @discord.ui.button(label="Проигнорировано", style=discord.ButtonStyle.secondary, emoji="⏭️")
-            async def ignore_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                modal = ReportCommentModal(self.report_message, "⏭️ Проигнорировано")
-                await interaction.response.send_modal(modal)
-
-            @discord.ui.button(label="Отменить", style=discord.ButtonStyle.danger, emoji="❌")
-            async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                await interaction.response.edit_message(content="❌ Действие отменено.", view=None)
-
         if report_message:
             view = ReportView(reporter, guild, blacklist, admin_roles_ids, thread)
             await report_message.edit(view=view)
@@ -580,6 +557,7 @@ class ReportReasonModal(discord.ui.Modal, title="Отправка жалобы")
 
 # ====== Context-menu (Message) ======
 @app_commands.context_menu(name="Пожаловаться")
+@app_commands.guild_only()
 async def context_report(interaction: discord.Interaction, message: discord.Message):
     cog: Reports | None = interaction.client.get_cog("Reports")
     if cog is None:

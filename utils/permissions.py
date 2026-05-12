@@ -1,4 +1,6 @@
 import utils.settings_cache as settings
+import discord
+from utils.exceptions import AdminAccessDeniedError
 
 def load_admin_roles():
     data = settings.load_settings()
@@ -18,6 +20,20 @@ async def check_admin(ctx):
 
     return False
 
+async def check_admin_interaction(interaction: discord.Interaction) -> bool: ##use: await check_admin_interaction(interaction)
+    """Проверка, является ли пользователь администратором или имеет роль из admin_roles (для slash-команд)."""
+    admin_roles = load_admin_roles()
+
+    # Проверка на администратора сервера
+    if getattr(interaction.user, 'guild_permissions', discord.Permissions()).administrator:
+        return True
+        
+    # Проверка по ролям
+    if hasattr(interaction.user, 'roles'):
+        if any(role.id in admin_roles for role in interaction.user.roles):
+            return True
+            
+    raise AdminAccessDeniedError()
 
 async def check_cog_access(ctx, required_access=None):
     """

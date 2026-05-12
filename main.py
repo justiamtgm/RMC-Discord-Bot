@@ -1,7 +1,11 @@
 import discord, os, traceback
+import aiosqlite
 from discord.ext import commands
+from discord import app_commands  
 from dotenv import load_dotenv
+from constants import RMC_EMBED_COLOR
 import healthcheck
+from utils.exceptions import NoLogChannelError, AdminAccessDeniedError
 
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
@@ -62,7 +66,6 @@ async def load_cogs():
                 bot.last_critical_error = tb
                 print(f"⚠ Ошибка при загрузке {cog_name}:\n{tb}")
 
-@commands.Cog.listener()
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CheckFailure):
@@ -76,6 +79,32 @@ async def on_command_error(ctx, error):
         return
 
     raise error
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    error_text = "❌ Произошла непредвиденная ошибка при выполнении команды."
+
+    if isinstance(error, NoLogChannelError):
+        error_text = "Канал для логов не настроен. Пожалуйста, настройте канал с помощью команды `/set_log`."
+    
+    elif isinstance(error, AdminAccessDeniedError):
+        error_text = "❌ Недостаточно прав для выполнения этой команды." 
+    
+    elif isinstance(error, app_commands.MissingPermissions):
+        error_text = f"У вас недостаточно прав для выполнения этой команды. Требуемые права: {', '.join(error.missing_permissions)}"
+    
+    elif isinstance(error, app_commands.CommandInvokeError):
+        original = error.original
+        if isinstance(original, aiosqlite.OperationalError) and "no such table" in str(original):
+            error_text = "❌ Ошибка базы данных: таблица не найдена. Попробуйте перезапустить бота для инициализации БД."
+        else:
+            error_text = f"❌ Произошла ошибка при выполнении команды: {str(original)}"
+
+    if interaction.response.is_done():
+        await interaction.followup.send(error_text, ephemeral=True)
+    else:
+        await interaction.response.send_message(error_text, ephemeral=True)
+
 
 
 

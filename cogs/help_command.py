@@ -1,89 +1,105 @@
 import discord
 from discord.ext import commands
-from discord.ui import Button, View
+from discord.ui import Select, View
 from discord import app_commands
 from utils.permissions import check_cog_access
 from utils import settings_cache as settings
 from constants import RMC_EMBED_COLOR
 
+COG_DESCRIPTIONS = {
+    "Anniversary": ("🎉 Годовщина", "Просмотр информации о годовщине сервера"),
+    "Rules": ("📜 Правила", "Удобный просмотр пунктов правил сервера"),
+    "Wiki": ("📚 Википедия", "Поиск статей по моддингу Hearts of Iron IV"),
+    "AdminSettings": ("💎 Админ-роли", "Настройка прав доступа администраторов"),
+    "AdminUtils": ("🛠️ Утилиты", "Технические утилиты для обновления бота"),
+    "Debug": ("📡 Дебаг", "Отладка работы бота и логирование"),
+    "FilterChannels": ("📵 Фильтруемые каналы", "Настройка каналов «только для медиа»"),
+    "Isolation": ("🔒 Изолятор", "Управление наказаниями и изоляцией нарушителей"),
+    "Messaging": ("📨 Сообщения бота", "Отправка сообщений и ответов через бота"),
+    "Omnivisor": ("👁️ Omnivisor", "Omnivisor — система многоуровневого логирования, аудита и аналитического контроля развития сервера."),
+    "Reports": ("🚨 Репорты", "Система анонимных жалоб пользователей"),
+    "Resolution": ("📝 Резолюции", "Создание официальных голосований-резолюций"),
+    "StarChannels": ("⭐ Звёздные каналы", "Настройка авто-веток и реакций для творчества"),
+    "Starboard": ("🌟 Starboard", "Настройка доски почёта для лучших работ"),
+    "HelpCmd": ("❓ Справка", "Справочная система бота")
+}
+
 class CommandWrapper:
-    def __init__(self, name, description, cog, is_admin, is_slash=False):
+    def __init__(self, name, description, prefix):
         self.name = name
         self.description = description
-        self.cog = cog
-        self.hidden = False
+        self.prefix = prefix
+
+class HelpDropdown(Select):
+    def __init__(self, categories, is_admin):
+        self.categories = categories
         self.is_admin = is_admin
-        self.is_slash = is_slash
         
-class PaginatedHelpView(View):
-    def __init__(self, command_chunks, author, admin_command_names=None, description=None):
-        super().__init__(timeout=60)
-        self.command_chunks = command_chunks
-        self.current_page = 0
-        self.author = author
-        self.admin_command_names = admin_command_names or []
-        self.description = description
-        #self.message = None
-    
-    @discord.ui.button(label="◀️ Назад", style=discord.ButtonStyle.secondary, custom_id="help_prev")
-    async def previous_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user != self.author:
-            return await interaction.response.send_message("❌ Эта кнопка не для тебя!", ephemeral=True)
+        options = []
+        for cog_name in categories.keys():
+            # Подтягиваем красивые названия и описания из маппинга
+            title, desc = COG_DESCRIPTIONS.get(cog_name, (f"🧩 {cog_name}", "Дополнительный функционал"))
+            emoji = title.split()[0] if " " in title else "🧩"
+            label = title.split(" ", 1)[1] if " " in title else title
+            
+            options.append(discord.SelectOption(
+                label=label,
+                description=desc[:100],
+                emoji=emoji,
+                value=cog_name
+            ))
         
-        self.current_page = (self.current_page - 1) % len(self.command_chunks)
-        embed = self.create_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-    
-    @discord.ui.button(label="▶️ Вперед", style=discord.ButtonStyle.secondary, custom_id="help_next")
-    async def next_button(self, interaction: discord.Interaction, button: Button):
-        if interaction.user != self.author:
-            return await interaction.response.send_message("❌ Эта кнопка не для тебя!", ephemeral=True)
+        super().__init__(
+            placeholder="Выберите раздел документации...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        cog_name = self.values[0]
+        commands_list = self.categories[cog_name]
+        title, desc = COG_DESCRIPTIONS.get(cog_name, (f"🧩 Раздел: {cog_name}", "Команды этого модуля."))
         
-        self.current_page = (self.current_page + 1) % len(self.command_chunks)
-        embed = self.create_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-    
-    def create_embed(self):
         embed = discord.Embed(
-            title=f"🛠️ Список команд (страница {self.current_page + 1}/{len(self.command_chunks)})",
-            color=RMC_EMBED_COLOR,
-            description=self.description
+            title=f"{title}",
+            description=f"**{desc}**\n\nЗдесь представлен список команд данного раздела. Подробности использования можно узнать, начав вводить команду.",
+            color=RMC_EMBED_COLOR
         )
         
-        commands_list = self.command_chunks[self.current_page]
-        for command in commands_list:
-
-            if hasattr(command, 'is_slash') and command.is_slash:
-                prefix = "/"
-            else:
-                prefix = "!rmc "
-
-            name = f"{prefix}{command.name}"
-            if command.name in self.admin_command_names:  # проверка по имени
-                name = "👑 " + name
+        for cmd in commands_list:
+            cmd_string = f"`{cmd.prefix}{cmd.name}`" if cmd.prefix != "🖱️" else f"`ПКМ → Приложения → {cmd.name}`"
             embed.add_field(
-                name=name,
-                value=command.description or "Без описания",
+                name=cmd_string,
+                value=cmd.description or "Контекстное меню / Без описания",
                 inline=False
             )
+            
+        embed.set_footer(text="Для перехода к другому разделу, используйте меню ниже ⬇️")
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+class HelpView(View):
+    def __init__(self, categories, is_admin, author):
+        super().__init__(timeout=600)
+        self.author = author
+        self.add_item(HelpDropdown(categories, is_admin))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user != self.author:
+            await interaction.response.send_message("❌ Вы не можете использовать это меню.", ephemeral=True)
+            return False
+        return True
         
-        return embed
-    #async def on_timeout(self):
-    #    """Когда кнопки истекли на сцене появлется данный герой"""
-    #    for child in self.children:
-    #        child.disabled = True
-#
-    #    if self.message:
-    #        try:
-    #            embed = self.create_embed()
-    #            embed.set_footer(text="⏰ Время ожидания истекло. Используйте /help заново.")
-    #            await self.message.edit(embed=embed, view=self)
-    #        except:
-    #            pass
-
-
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            pass # Можно добавить обновление сообщения для блокировки селекта, если нужно
+        except Exception:
+            pass
 
 class HelpCmd(commands.Cog):
+    """Справочная система бота"""
     required_access = None
 
     def __init__(self, bot):
@@ -98,112 +114,84 @@ class HelpCmd(commands.Cog):
     @commands.hybrid_command(
         name="help",
         with_app_command=True,
-        description="Показывает список команд"
+        description="Показывает интерактивную документацию по боту"
     )
     async def help(self, ctx: commands.Context):
-        # Собираем обычные команды
-        regular_commands = []
-        admin_commands = []
+        user_roles = getattr(ctx.author, 'roles', [])
+        settings_data = settings.load_settings()
+        admin_roles = settings_data.get('admin_roles', [])
+        
+        is_admin = False
+        if ctx.author.id == self.bot.owner_id or getattr(ctx.author, 'guild_permissions', discord.Permissions()).administrator:
+            is_admin = True
+        elif any(role.id in admin_roles for role in user_roles):
+            is_admin = True
+            
+        categories = {}
 
+        # 1. Сбор гибридных и префиксных команд
         for command in self.bot.commands:
             if command.hidden or command.name == "help":
                 continue
             
-            is_admin_cmd = hasattr(command.cog, 'required_access') and command.cog.required_access == "admin"
+            cog = command.cog
+            cog_name = cog.__class__.__name__ if cog else "Остальное"
+            req_access = getattr(cog, 'required_access', None) if cog else None
             
-            wrapper = CommandWrapper(
-                name=command.name,
-                description=command.description or "Без описания",
-                cog=command.cog,
-                is_admin=is_admin_cmd,
-                is_slash=False  # обычные команды
-            )
-            
-            if is_admin_cmd:
-                admin_commands.append(wrapper)
-            else:
-                regular_commands.append(wrapper)
+            # Фильтр для юзеров (скрываем админские коги)
+            if req_access == "admin" and not is_admin:
+                continue
 
-        # Собираем чистые слэш-команды
+            if cog_name not in categories:
+                categories[cog_name] = []
+                
+            prefix = "/" if isinstance(command, commands.HybridCommand) else "!rmc "
+            categories[cog_name].append(CommandWrapper(command.name, command.description, prefix))
+
+        # 2. Сбор чистых слэш-команд и контекстных меню
         for cmd in self.bot.tree.walk_commands():
             # Пропускаем, если это гибридная команда (уже есть в bot.commands)
             if any(c.name == cmd.name for c in self.bot.commands):
                 continue
             
-            # Определяем, админская ли команда
-            is_admin_cmd = False
-            if hasattr(cmd, 'binding') and hasattr(cmd.binding, 'required_access'):
-                if cmd.binding.required_access == "admin":  # ✅ исправлено
-                    is_admin_cmd = True
-            
-            # Создаём обёртку
-            
-            wrapper = CommandWrapper(
-                name=cmd.name,
-                description=cmd.description or "Без описания",
-                cog=cmd.binding if hasattr(cmd, 'binding') else None,
-                is_admin=is_admin_cmd,
-                is_slash=True
-            )
-            
-            if is_admin_cmd:
-                admin_commands.append(wrapper)
+            cog = cmd.binding if hasattr(cmd, 'binding') else None
+            cog_name = cog.__class__.__name__ if cog else "Остальное"
+            req_access = getattr(cog, 'required_access', None) if cog else None
+
+            if req_access == "admin" and not is_admin:
+                continue
+
+            if cog_name not in categories:
+                categories[cog_name] = []
+
+            # Контекстные меню не вызываются через слеш
+            if isinstance(cmd, app_commands.ContextMenu):
+                prefix = "🖱️"
             else:
-                regular_commands.append(wrapper)
+                prefix = "/"
+                
+            categories[cog_name].append(CommandWrapper(cmd.name, cmd.description, prefix))
 
-        user_roles = ctx.author.roles
-
-        settings_data = settings.load_settings()
-        admin_roles = settings_data.get('admin_roles', [])
-        is_admin = any(role.id in admin_roles for role in user_roles)
+        # Очистка пустых категорий
+        categories = {k: v for k, v in categories.items() if v}
         
-        if is_admin:
-            display_commands = regular_commands + admin_commands
-        else:
-            display_commands = regular_commands
-        # Разбиваем на группы по 20 команд (оставляем запас)
-
-        desc="Команды для админов помечены 👑" if is_admin else None
-        #print(f"is_admin={is_admin}, desc={desc}") 
-
-        chunk_size = 20
-        command_chunks = [display_commands[i:i + chunk_size] 
-                         for i in range(0, len(display_commands), chunk_size)]
-        
-        if not command_chunks:
+        if not categories:
             await ctx.reply("❌ Команды не найдены!")
             return
+            
+        embed = discord.Embed(
+            title="📖 Документация бота РМК",
+            description=(
+                "Добро пожаловать в справочный центр РМК-Бота!\n\n"
+                "Функционал разбит по логическим блокам. Используйте **выпадающее меню ниже**, чтобы выбрать интересующий вас раздел и посмотреть список доступных команд.\n\n"
+                f"**Ваш уровень доступа:** {'`Администратор` 👑' if is_admin else '`Пользователь` 👤'}"
+            ),
+            color=RMC_EMBED_COLOR
+        )
+        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         
-        
-
-        # Если всего 1 страница - отправляем просто embed
-        if len(command_chunks) == 1:
-            
-            embed = discord.Embed(
-                title="🛠️ Список доступных команд",
-                color=RMC_EMBED_COLOR,
-                description=desc
-            )
-            
-            for command in display_commands:
-                is_admin_command = hasattr(command.cog, 'required_access') and command.cog.required_access == 'admin'
-                name = f"!rmc {command.name}"
-                if is_admin_command:
-                    name = "👑 " + name
-                embed.add_field(
-                    name=name,
-                    value=command.description or "Без описания",
-                    inline=False
-                )
-            
-            await ctx.reply(embed=embed)
-        else:
-            # Если много страниц - используем пагинацию
-            admin_names = [cmd.name for cmd in admin_commands]  # список имён админских команд
-            view = PaginatedHelpView(command_chunks, ctx.author, admin_names, description=desc)
-            embed = view.create_embed()
-            await ctx.reply(embed=embed, view=view)
-
+        view = HelpView(categories, is_admin, ctx.author)
+        await ctx.reply(embed=embed, view=view)
 
 async def setup(bot):
     await bot.add_cog(HelpCmd(bot))
